@@ -1,17 +1,14 @@
 module gc
 
-// Heap configuration
-// Default heap size in bytes
+// Heap configuration constants
 const default_heap_size = u32(32 * 1024 * 1024) // 32MB
-
-// Number of heap partitions for fragmentation reduction
+const default_max_heap_size = u32(512 * 1024 * 1024) // 512MB max
 const default_partitions = 8
-// Minimum object size in bytes
 const min_object_size = 16
-// GC trigger threshold (percentage of heap used)
 const gc_trigger_threshold = 0.75
-// Maximum number of roots to scan
 const max_roots = 10000
+const heap_growth_factor = 2.0 // Double the heap when growing
+const min_growth_size = u32(4 * 1024 * 1024) // Minimum 4MB growth
 
 // Object header for tracking allocations
 struct ObjectHeader {
@@ -42,6 +39,7 @@ struct GCRoot {
 pub struct GCConfig {
 pub:
 	heap_size           u32  = default_heap_size
+	max_heap_size       u32  = default_max_heap_size
 	num_partitions      u32  = default_partitions
 	trigger_threshold   f64  = gc_trigger_threshold
 	max_roots           int  = max_roots
@@ -49,6 +47,10 @@ pub:
 	enable_compaction   bool
 	debug_mode          bool
 	allocation_tracking bool
+	growth_factor       f64 = heap_growth_factor
+	min_growth_size     u32 = min_growth_size
+mut:
+	enable_heap_growth bool = true
 }
 
 // Memory allocation statistics for debugging and profiling
@@ -65,6 +67,7 @@ pub struct GarbageCollector {
 mut:
 	heap_base       voidptr
 	heap_size       u32
+	max_heap_size   u32
 	partitions      []HeapPartition
 	num_partitions  u32
 	total_allocated u32
@@ -78,6 +81,9 @@ mut:
 	incremental_partition_index int
 	// Configuration
 	config GCConfig
+	// Heap growth tracking
+	growth_count         u32
+	last_growth_gc_count u32
 }
 
 pub fn (gc_ &GarbageCollector) heap_size() u32 {
@@ -92,6 +98,7 @@ pub fn (gc_ &GarbageCollector) num_partitions() u32 {
 pub fn new_garbage_collector(heap_size u32) &GarbageCollector {
 	mut gc_ := &GarbageCollector{
 		heap_size:                   if heap_size == 0 { default_heap_size } else { heap_size }
+		max_heap_size:               default_max_heap_size
 		num_partitions:              default_partitions
 		incremental_partition_index: 0
 		config:                      GCConfig{}
@@ -133,6 +140,7 @@ pub fn new_garbage_collector(heap_size u32) &GarbageCollector {
 pub fn new_garbage_collector_with_config(config GCConfig) &GarbageCollector {
 	mut gc_ := &GarbageCollector{
 		heap_size:                   config.heap_size
+		max_heap_size:               config.max_heap_size
 		num_partitions:              config.num_partitions
 		incremental_partition_index: 0
 		config:                      config
@@ -174,7 +182,143 @@ fn (mut gc_ GarbageCollector) init_partitions_optimized() {
 	}
 }
 
-// Allocate memory with conservative GC support
+// Check if heap should grow
+fn (gc_ &GarbageCollector) should_grow_heap() bool {
+	if !gc_.config.enable_heap_growth {
+		return false
+	}
+
+	if gc_.heap_size >= gc_.max_heap_size {
+		return false // Already at maximum size
+	}
+
+	// Don't grow too frequently - wait at least 5 GC cycles
+	if gc_.gc_count - gc_.last_growth_gc_count < 5 {
+		return false
+	}
+
+	// Calculate current usage
+	usage_ratio := f64(gc_.total_allocated) / f64(gc_.heap_size)
+
+	// Grow if we're using more than 90% after GC
+	return usage_ratio > 0.9
+}
+
+// Calculate new heap size
+fn (gc_ &GarbageCollector) calculate_new_heap_size() u32 {
+	growth_factor := gc_.config.growth_factor
+	min_growth := gc_.config.min_growth_size
+
+	// Calculate size based on growth factor
+	new_size_by_factor := u32(f64(gc_.heap_size) * growth_factor)
+
+	// Calculate size based on minimum growth
+	new_size_by_min := gc_.heap_size + min_growth
+
+	// Use the larger of the two
+	mut new_size := if new_size_by_factor > new_size_by_min {
+		new_size_by_factor
+	} else {
+		new_size_by_min
+	}
+
+	// Cap at maximum heap size
+	if new_size > gc_.max_heap_size {
+		new_size = gc_.max_heap_size
+	}
+
+	return new_size
+}
+
+// Grow the heap
+pub fn (mut gc_ GarbageCollector) grow_heap() bool {
+	if !gc_.should_grow_heap() {
+		return false
+	}
+
+	new_heap_size := gc_.calculate_new_heap_size()
+	if new_heap_size <= gc_.heap_size {
+		return false // No growth possible
+	}
+
+	// Allocate new larger heap
+	new_heap_base := unsafe { malloc(int(new_heap_size)) }
+	if new_heap_base == unsafe { nil } {
+		return false // Failed to allocate
+	}
+
+	// Copy existing data to new heap
+	unsafe {
+		C.memcpy(new_heap_base, gc_.heap_base, int(gc_.heap_size))
+	}
+
+	// Calculate size difference
+	size_increase := new_heap_size - gc_.heap_size
+
+	// Free old heap
+	unsafe { free(gc_.heap_base) }
+
+	// Update heap pointers
+	old_heap_base := gc_.heap_base
+	gc_.heap_base = new_heap_base
+	heap_offset := usize(new_heap_base) - usize(old_heap_base)
+
+	// Update all partition pointers
+	for mut partition in gc_.partitions {
+		partition.start_addr = unsafe { voidptr(usize(partition.start_addr) + heap_offset) }
+
+		// Update free list pointer
+		if partition.free_list != unsafe { nil } {
+			partition.free_list = unsafe { &ObjectHeader(usize(partition.free_list) + heap_offset) }
+		}
+
+		// Update object pointers
+		for i in 0 .. partition.objects.len {
+			partition.objects[i] = unsafe { &ObjectHeader(usize(partition.objects[i]) + heap_offset) }
+		}
+
+		// Update free list chain
+		mut current := partition.free_list
+		for current != unsafe { nil } {
+			if current.next != unsafe { nil } {
+				current.next = unsafe { &ObjectHeader(usize(current.next) + heap_offset) }
+			}
+			current = current.next
+		}
+	}
+
+	// Add new space to the last partition
+	mut last_partition := &gc_.partitions[gc_.partitions.len - 1]
+
+	// Create new free block for the additional space
+	new_space_start := unsafe {
+		voidptr(usize(last_partition.start_addr) + usize(last_partition.size))
+	}
+	new_free_block := unsafe { &ObjectHeader(new_space_start) }
+
+	unsafe {
+		*new_free_block = ObjectHeader{
+			size:   size_increase - sizeof(ObjectHeader)
+			marked: false
+			next:   last_partition.free_list
+		}
+	}
+	last_partition.free_list = new_free_block
+	last_partition.size += size_increase
+
+	// Update collector state
+	gc_.heap_size = new_heap_size
+	gc_.growth_count++
+	gc_.last_growth_gc_count = gc_.gc_count
+
+	if gc_.config.debug_mode {
+		println('Heap grown from ${gc_.heap_size - size_increase} to ${gc_.heap_size} bytes (growth #${gc_.growth_count})')
+	}
+
+	return true
+}
+
+// Allocate memory with conservative GC support and heap growth
 pub fn (mut gc_ GarbageCollector) alloc(size u32) voidptr {
 	if !gc_.enabled {
 		return unsafe { malloc(int(size)) }
@@ -190,8 +334,16 @@ pub fn (mut gc_ GarbageCollector) alloc(size u32) voidptr {
 		// Try garbage collection first
 		gc_.collect()
 		partition_idx = gc_.find_best_partition(total_size)
+
 		if partition_idx == -1 {
-			return unsafe { nil } // Out of memory
+			// Try growing the heap
+			if gc_.grow_heap() {
+				partition_idx = gc_.find_best_partition(total_size)
+			}
+
+			if partition_idx == -1 {
+				return unsafe { nil } // Out of memory even after growth
+			}
 		}
 	}
 
@@ -987,6 +1139,7 @@ fn (gc_ &GarbageCollector) validate_partition(partition HeapPartition, partition
 pub fn (gc_ &GarbageCollector) print_heap_layout() {
 	println('Heap Layout:')
 	println('Base: ${gc_.heap_base}, Size: ${gc_.heap_size}')
+	println('Max Size: ${gc_.max_heap_size}, Growth Count: ${gc_.growth_count}')
 	println('Partitions: ${gc_.num_partitions}')
 
 	for i, partition in gc_.partitions {
@@ -1003,6 +1156,43 @@ pub fn (gc_ &GarbageCollector) print_heap_layout() {
 		}
 		println('  Free blocks: ${free_blocks}')
 	}
+}
+
+// Get heap growth statistics
+pub struct HeapGrowthStats {
+pub:
+	current_size   u32
+	max_size       u32
+	growth_count   u32
+	can_grow       bool
+	growth_factor  f64
+	last_growth_gc u32
+}
+
+pub fn (gc_ &GarbageCollector) get_growth_stats() HeapGrowthStats {
+	return HeapGrowthStats{
+		current_size:   gc_.heap_size
+		max_size:       gc_.max_heap_size
+		growth_count:   gc_.growth_count
+		can_grow:       gc_.config.enable_heap_growth && gc_.heap_size < gc_.max_heap_size
+		growth_factor:  gc_.config.growth_factor
+		last_growth_gc: gc_.last_growth_gc_count
+	}
+}
+
+// Force heap growth (for testing/manual control)
+pub fn (mut gc_ GarbageCollector) force_grow_heap() bool {
+	if gc_.heap_size >= gc_.max_heap_size {
+		return false
+	}
+
+	// Temporarily override the growth check
+	old_enable := gc_.config.enable_heap_growth
+	gc_.config.enable_heap_growth = true
+
+	result := gc_.grow_heap()
+	gc_.config.enable_heap_growth = old_enable
+	return result
 }
 
 // Enable or disable garbage collection
