@@ -49,7 +49,7 @@ pub:
 	allocation_tracking bool
 	growth_factor       f64 = heap_growth_factor
 	min_growth_size     u32 = min_growth_size
-mut:
+pub mut:
 	enable_heap_growth bool = true
 }
 
@@ -79,11 +79,12 @@ mut:
 	enabled         bool = true
 	// Incremental collection state
 	incremental_partition_index int
-	// Configuration
-	config GCConfig
 	// Heap growth tracking
 	growth_count         u32
 	last_growth_gc_count u32
+pub mut:
+	// Configuration
+	config GCConfig
 }
 
 pub fn (gc_ &GarbageCollector) heap_size() u32 {
