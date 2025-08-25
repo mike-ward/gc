@@ -319,7 +319,7 @@ pub fn (mut gc_ GarbageCollector) grow_heap() bool {
 	return true
 }
 
-// Allocate memory with conservative GC support and heap growth
+// Update the allocation function to be more aggressive about growth
 pub fn (mut gc_ GarbageCollector) alloc(size u32) voidptr {
 	if !gc_.enabled {
 		return unsafe { malloc(int(size)) }
@@ -337,8 +337,8 @@ pub fn (mut gc_ GarbageCollector) alloc(size u32) voidptr {
 		partition_idx = gc_.find_best_partition(total_size)
 
 		if partition_idx == -1 {
-			// Try growing the heap
-			if gc_.grow_heap() {
+			// Try growing the heap - be more aggressive
+			if gc_.should_grow_after_failure(total_size) && gc_.grow_heap() {
 				partition_idx = gc_.find_best_partition(total_size)
 			}
 
@@ -348,6 +348,7 @@ pub fn (mut gc_ GarbageCollector) alloc(size u32) voidptr {
 		}
 	}
 
+	// ... rest of allocation logic remains the same
 	mut partition := &gc_.partitions[partition_idx]
 
 	// Find free block in partition
@@ -379,7 +380,7 @@ pub fn (mut gc_ GarbageCollector) alloc(size u32) voidptr {
 
 			// Initialize object header
 			current.marked = false
-			current.type_id = 0 // Conservative GC doesn't use type info
+			current.type_id = 0
 			current.next = unsafe { nil }
 
 			// Add to objects list
@@ -399,7 +400,7 @@ pub fn (mut gc_ GarbageCollector) alloc(size u32) voidptr {
 		current = current.next
 	}
 
-	return unsafe { nil } // No suitable block found
+	return unsafe { nil }
 }
 
 // Optimized allocation with size class routing
@@ -457,6 +458,24 @@ fn (gc_ &GarbageCollector) get_size_class(size u32) u32 {
 		return 4
 	}
 	return 5 // larger objects
+}
+
+// Check if we should attempt growth after allocation failure
+fn (gc_ &GarbageCollector) should_grow_after_failure(requested_size u32) bool {
+	if !gc_.config.enable_heap_growth {
+		return false
+	}
+
+	if gc_.heap_size >= gc_.max_heap_size {
+		return false
+	}
+
+	// Always try to grow if we can't allocate and haven't reached max size
+	// Check if the requested size would fit after growth
+	new_size := gc_.calculate_new_heap_size()
+	additional_space := new_size - gc_.heap_size
+
+	return additional_space >= requested_size * 2 // Ensure some headroom
 }
 
 // Allocate from specific partition (optimized path)
