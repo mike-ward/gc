@@ -123,13 +123,17 @@ fn demo_heap_growth(mut collector gc.GarbageCollector) {
 	mut large_objects := []voidptr{}
 	mut growth_stats_before := collector.get_growth_stats()
 
+	// Use smaller objects that can fit in initial partitions but will still trigger growth
+	// Each partition is heap_size/num_partitions = 4MB/8 = 512KB
+	// So use 256KB objects to allow some overhead
+	object_size := u32(256 * 1024) // 256KB instead of 512KB
+
 	// Allocate objects that will fill up the heap
-	for i in 0 .. 20 {
-		// Allocate 512KB objects
-		ptr := collector.alloc(512 * 1024)
+	for i in 0 .. 40 { // Increased count since objects are smaller
+		ptr := collector.alloc(object_size)
 		if ptr != unsafe { nil } {
 			large_objects << ptr
-			println('Allocated object ${i + 1} (512KB)')
+			println('Allocated object ${i + 1} (${object_size / 1024}KB)')
 
 			// Check if heap has grown
 			growth_stats := collector.get_growth_stats()
@@ -143,7 +147,29 @@ fn demo_heap_growth(mut collector gc.GarbageCollector) {
 			print_collector_status(collector)
 		} else {
 			println('❌ Allocation failed for object ${i + 1}')
-			break
+			println('Trying to trigger growth manually...')
+
+			// Force a collection first
+			collector.force_collect()
+
+			// Try to grow heap manually
+			if collector.force_grow_heap() {
+				println('✅ Heap growth successful, retrying allocation...')
+				ptr_retry := collector.alloc(object_size)
+				if ptr_retry != unsafe { nil } {
+					large_objects << ptr_retry
+					println('✅ Retry successful for object ${i + 1}')
+
+					growth_stats := collector.get_growth_stats()
+					println('🚀 MANUAL HEAP GROWTH!')
+					println('  New heap size: ${growth_stats.current_size / (1024 * 1024)}MB')
+					println('  Growth #${growth_stats.growth_count}')
+					growth_stats_before = growth_stats
+				}
+			} else {
+				println('❌ Manual heap growth failed')
+				break
+			}
 		}
 	}
 
