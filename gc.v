@@ -87,17 +87,17 @@ pub mut:
 	config GCConfig
 }
 
-pub fn (gc_ &GarbageCollector) heap_size() u32 {
-	return gc_.heap_size
+pub fn (collector &GarbageCollector) heap_size() u32 {
+	return collector.heap_size
 }
 
-pub fn (gc_ &GarbageCollector) num_partitions() u32 {
-	return gc_.num_partitions
+pub fn (collector &GarbageCollector) num_partitions() u32 {
+	return collector.num_partitions
 }
 
 // Initialize the garbage collector
 pub fn new_garbage_collector(heap_size u32) &GarbageCollector {
-	mut gc_ := &GarbageCollector{
+	mut collector := &GarbageCollector{
 		heap_size:                   if heap_size == 0 { default_heap_size } else { heap_size }
 		max_heap_size:               default_max_heap_size
 		num_partitions:              default_partitions
@@ -106,18 +106,18 @@ pub fn new_garbage_collector(heap_size u32) &GarbageCollector {
 	}
 
 	// Allocate heap memory
-	gc_.heap_base = unsafe { malloc(int(gc_.heap_size)) }
-	if gc_.heap_base == unsafe { nil } {
+	collector.heap_base = unsafe { malloc(int(collector.heap_size)) }
+	if collector.heap_base == unsafe { nil } {
 		panic('Failed to allocate heap memory')
 	}
 
 	// Initialize partitions
-	partition_size := gc_.heap_size / gc_.num_partitions
-	gc_.partitions = []HeapPartition{len: int(gc_.num_partitions)}
+	partition_size := collector.heap_size / collector.num_partitions
+	collector.partitions = []HeapPartition{len: int(collector.num_partitions)}
 
-	for i in 0 .. gc_.num_partitions {
-		mut partition := &gc_.partitions[i]
-		partition.start_addr = unsafe { voidptr(usize(gc_.heap_base) + usize(i * partition_size)) }
+	for i in 0 .. collector.num_partitions {
+		mut partition := &collector.partitions[i]
+		partition.start_addr = unsafe { voidptr(usize(collector.heap_base) + usize(i * partition_size)) }
 		partition.size = partition_size
 		partition.used = 0
 		partition.objects = []&ObjectHeader{}
@@ -134,12 +134,12 @@ pub fn new_garbage_collector(heap_size u32) &GarbageCollector {
 		partition.free_list = unsafe { &ObjectHeader(partition.start_addr) }
 	}
 
-	return gc_
+	return collector
 }
 
 // Enhanced constructor with configuration
 pub fn new_garbage_collector_with_config(config GCConfig) &GarbageCollector {
-	mut gc_ := &GarbageCollector{
+	mut collector := &GarbageCollector{
 		heap_size:                   config.heap_size
 		max_heap_size:               config.max_heap_size
 		num_partitions:              config.num_partitions
@@ -147,25 +147,25 @@ pub fn new_garbage_collector_with_config(config GCConfig) &GarbageCollector {
 		config:                      config
 	}
 
-	gc_.heap_base = unsafe { malloc(int(config.heap_size)) }
-	if gc_.heap_base == unsafe { nil } {
+	collector.heap_base = unsafe { malloc(int(config.heap_size)) }
+	if collector.heap_base == unsafe { nil } {
 		panic('Failed to allocate heap memory')
 	}
 
 	// Initialize partitions with size-based allocation strategy
-	gc_.init_partitions_optimized()
+	collector.init_partitions_optimized()
 
-	return gc_
+	return collector
 }
 
 // Optimized partition initialization with size classes
-fn (mut gc_ GarbageCollector) init_partitions_optimized() {
-	partition_size := gc_.heap_size / gc_.num_partitions
-	gc_.partitions = []HeapPartition{len: int(gc_.num_partitions)}
+fn (mut collector GarbageCollector) init_partitions_optimized() {
+	partition_size := collector.heap_size / collector.num_partitions
+	collector.partitions = []HeapPartition{len: int(collector.num_partitions)}
 
-	for i in 0 .. gc_.num_partitions {
-		mut partition := &gc_.partitions[i]
-		partition.start_addr = unsafe { voidptr(usize(gc_.heap_base) + usize(i * partition_size)) }
+	for i in 0 .. collector.num_partitions {
+		mut partition := &collector.partitions[i]
+		partition.start_addr = unsafe { voidptr(usize(collector.heap_base) + usize(i * partition_size)) }
 		partition.size = partition_size
 		partition.used = 0
 		partition.objects = []&ObjectHeader{cap: 100} // Pre-allocate capacity
@@ -184,37 +184,37 @@ fn (mut gc_ GarbageCollector) init_partitions_optimized() {
 }
 
 // Check if heap should grow
-fn (gc_ &GarbageCollector) should_grow_heap() bool {
-	if !gc_.config.enable_heap_growth {
+fn (collector &GarbageCollector) should_grow_heap() bool {
+	if !collector.config.enable_heap_growth {
 		return false
 	}
 
-	if gc_.heap_size >= gc_.max_heap_size {
+	if collector.heap_size >= collector.max_heap_size {
 		return false // Already at maximum size
 	}
 
 	// Don't grow too frequently - wait at least 5 GC cycles
-	if gc_.gc_count - gc_.last_growth_gc_count < 5 {
+	if collector.gc_count - collector.last_growth_gc_count < 5 {
 		return false
 	}
 
 	// Calculate current usage
-	usage_ratio := f64(gc_.total_allocated) / f64(gc_.heap_size)
+	usage_ratio := f64(collector.total_allocated) / f64(collector.heap_size)
 
 	// Grow if we're using more than 90% after GC
 	return usage_ratio > 0.9
 }
 
 // Calculate new heap size
-fn (gc_ &GarbageCollector) calculate_new_heap_size() u32 {
-	growth_factor := gc_.config.growth_factor
-	min_growth := gc_.config.min_growth_size
+fn (collector &GarbageCollector) calculate_new_heap_size() u32 {
+	growth_factor := collector.config.growth_factor
+	min_growth := collector.config.min_growth_size
 
 	// Calculate size based on growth factor
-	new_size_by_factor := u32(f64(gc_.heap_size) * growth_factor)
+	new_size_by_factor := u32(f64(collector.heap_size) * growth_factor)
 
 	// Calculate size based on minimum growth
-	new_size_by_min := gc_.heap_size + min_growth
+	new_size_by_min := collector.heap_size + min_growth
 
 	// Use the larger of the two
 	mut new_size := if new_size_by_factor > new_size_by_min {
@@ -224,21 +224,21 @@ fn (gc_ &GarbageCollector) calculate_new_heap_size() u32 {
 	}
 
 	// Cap at maximum heap size
-	if new_size > gc_.max_heap_size {
-		new_size = gc_.max_heap_size
+	if new_size > collector.max_heap_size {
+		new_size = collector.max_heap_size
 	}
 
 	return new_size
 }
 
 // Grow the heap
-pub fn (mut gc_ GarbageCollector) grow_heap() bool {
-	if !gc_.should_grow_heap() {
+pub fn (mut collector GarbageCollector) grow_heap() bool {
+	if !collector.should_grow_heap() {
 		return false
 	}
 
-	new_heap_size := gc_.calculate_new_heap_size()
-	if new_heap_size <= gc_.heap_size {
+	new_heap_size := collector.calculate_new_heap_size()
+	if new_heap_size <= collector.heap_size {
 		return false // No growth possible
 	}
 
@@ -250,22 +250,22 @@ pub fn (mut gc_ GarbageCollector) grow_heap() bool {
 
 	// Copy existing data to new heap
 	unsafe {
-		C.memcpy(new_heap_base, gc_.heap_base, int(gc_.heap_size))
+		C.memcpy(new_heap_base, collector.heap_base, int(collector.heap_size))
 	}
 
 	// Calculate size difference
-	size_increase := new_heap_size - gc_.heap_size
+	size_increase := new_heap_size - collector.heap_size
 
 	// Free old heap
-	unsafe { free(gc_.heap_base) }
+	unsafe { free(collector.heap_base) }
 
 	// Update heap pointers
-	old_heap_base := gc_.heap_base
-	gc_.heap_base = new_heap_base
+	old_heap_base := collector.heap_base
+	collector.heap_base = new_heap_base
 	heap_offset := usize(new_heap_base) - usize(old_heap_base)
 
 	// Update all partition pointers
-	for mut partition in gc_.partitions {
+	for mut partition in collector.partitions {
 		partition.start_addr = unsafe { voidptr(usize(partition.start_addr) + heap_offset) }
 
 		// Update free list pointer
@@ -289,7 +289,7 @@ pub fn (mut gc_ GarbageCollector) grow_heap() bool {
 	}
 
 	// Add new space to the last partition
-	mut last_partition := &gc_.partitions[gc_.partitions.len - 1]
+	mut last_partition := &collector.partitions[collector.partitions.len - 1]
 
 	// Create new free block for the additional space
 	new_space_start := unsafe {
@@ -308,20 +308,20 @@ pub fn (mut gc_ GarbageCollector) grow_heap() bool {
 	last_partition.size += size_increase
 
 	// Update collector state
-	gc_.heap_size = new_heap_size
-	gc_.growth_count++
-	gc_.last_growth_gc_count = gc_.gc_count
+	collector.heap_size = new_heap_size
+	collector.growth_count++
+	collector.last_growth_gc_count = collector.gc_count
 
-	if gc_.config.debug_mode {
-		println('Heap grown from ${gc_.heap_size - size_increase} to ${gc_.heap_size} bytes (growth #${gc_.growth_count})')
+	if collector.config.debug_mode {
+		println('Heap grown from ${collector.heap_size - size_increase} to ${collector.heap_size} bytes (growth #${collector.growth_count})')
 	}
 
 	return true
 }
 
 // Update the allocation function to be more aggressive about growth
-pub fn (mut gc_ GarbageCollector) alloc(size u32) voidptr {
-	if !gc_.enabled {
+pub fn (mut collector GarbageCollector) alloc(size u32) voidptr {
+	if !collector.enabled {
 		return unsafe { malloc(int(size)) }
 	}
 
@@ -330,16 +330,16 @@ pub fn (mut gc_ GarbageCollector) alloc(size u32) voidptr {
 	total_size := aligned_size + sizeof(ObjectHeader)
 
 	// Find best partition based on size
-	mut partition_idx := gc_.find_best_partition(total_size)
+	mut partition_idx := collector.find_best_partition(total_size)
 	if partition_idx == -1 {
 		// Try garbage collection first
-		gc_.collect()
-		partition_idx = gc_.find_best_partition(total_size)
+		collector.collect()
+		partition_idx = collector.find_best_partition(total_size)
 
 		if partition_idx == -1 {
 			// Try growing the heap - be more aggressive
-			if gc_.should_grow_after_failure(total_size) && gc_.grow_heap() {
-				partition_idx = gc_.find_best_partition(total_size)
+			if collector.should_grow_after_failure(total_size) && collector.grow_heap() {
+				partition_idx = collector.find_best_partition(total_size)
 			}
 
 			if partition_idx == -1 {
@@ -348,8 +348,7 @@ pub fn (mut gc_ GarbageCollector) alloc(size u32) voidptr {
 		}
 	}
 
-	// ... rest of allocation logic remains the same
-	mut partition := &gc_.partitions[partition_idx]
+	mut partition := &collector.partitions[partition_idx]
 
 	// Find free block in partition
 	mut prev := unsafe { &ObjectHeader(nil) }
@@ -386,11 +385,11 @@ pub fn (mut gc_ GarbageCollector) alloc(size u32) voidptr {
 			// Add to objects list
 			partition.objects << current
 			partition.used += total_size
-			gc_.total_allocated += total_size
+			collector.total_allocated += total_size
 
 			// Check if GC should be triggered
-			if gc_.should_collect() {
-				gc_.collect()
+			if collector.should_collect() {
+				collector.collect()
 			}
 
 			// Return pointer to object data (after header)
@@ -404,44 +403,44 @@ pub fn (mut gc_ GarbageCollector) alloc(size u32) voidptr {
 }
 
 // Optimized allocation with size class routing
-pub fn (mut gc_ GarbageCollector) alloc_optimized(size u32) voidptr {
-	if !gc_.enabled {
+pub fn (mut collector GarbageCollector) alloc_optimized(size u32) voidptr {
+	if !collector.enabled {
 		return unsafe { malloc(int(size)) }
 	}
 
 	// Route small allocations to optimized path
 	if size <= 512 {
-		return gc_.alloc_small_object(size)
+		return collector.alloc_small_object(size)
 	}
 
 	// Use regular allocation for larger objects
-	return gc_.alloc(size)
+	return collector.alloc(size)
 }
 
 // Fast path for small object allocation
-fn (mut gc_ GarbageCollector) alloc_small_object(size u32) voidptr {
+fn (mut collector GarbageCollector) alloc_small_object(size u32) voidptr {
 	// Find appropriate size class
-	size_class := gc_.get_size_class(size)
+	size_class := collector.get_size_class(size)
 
 	// Try to find a partition optimized for this size class
-	partition_idx := int(size_class % gc_.num_partitions)
+	partition_idx := int(size_class % collector.num_partitions)
 
 	aligned_size := ((size + min_object_size - 1) / min_object_size) * min_object_size
 	total_size := aligned_size + sizeof(ObjectHeader)
 
-	mut partition := &gc_.partitions[partition_idx]
+	mut partition := &collector.partitions[partition_idx]
 
 	// Quick allocation attempt
 	if partition.free_list != unsafe { nil } && partition.free_list.size >= total_size {
-		return gc_.alloc_from_partition(mut partition, total_size)
+		return collector.alloc_from_partition(mut partition, total_size)
 	}
 
 	// Fall back to regular allocation
-	return gc_.alloc(size)
+	return collector.alloc(size)
 }
 
 // Get size class for small object optimization
-fn (gc_ &GarbageCollector) get_size_class(size u32) u32 {
+fn (collector &GarbageCollector) get_size_class(size u32) u32 {
 	if size <= 32 {
 		return 0
 	}
@@ -461,25 +460,25 @@ fn (gc_ &GarbageCollector) get_size_class(size u32) u32 {
 }
 
 // Check if we should attempt growth after allocation failure
-fn (gc_ &GarbageCollector) should_grow_after_failure(requested_size u32) bool {
-	if !gc_.config.enable_heap_growth {
+fn (collector &GarbageCollector) should_grow_after_failure(requested_size u32) bool {
+	if !collector.config.enable_heap_growth {
 		return false
 	}
 
-	if gc_.heap_size >= gc_.max_heap_size {
+	if collector.heap_size >= collector.max_heap_size {
 		return false
 	}
 
 	// Always try to grow if we can't allocate and haven't reached max size
 	// Check if the requested size would fit after growth
-	new_size := gc_.calculate_new_heap_size()
-	additional_space := new_size - gc_.heap_size
+	new_size := collector.calculate_new_heap_size()
+	additional_space := new_size - collector.heap_size
 
 	return additional_space >= requested_size * 2 // Ensure some headroom
 }
 
 // Allocate from specific partition (optimized path)
-fn (mut gc_ GarbageCollector) alloc_from_partition(mut partition HeapPartition, total_size u32) voidptr {
+fn (mut collector GarbageCollector) alloc_from_partition(mut partition HeapPartition, total_size u32) voidptr {
 	mut current := partition.free_list
 
 	if current.size >= total_size {
@@ -508,7 +507,7 @@ fn (mut gc_ GarbageCollector) alloc_from_partition(mut partition HeapPartition, 
 		// Add to objects list
 		partition.objects << current
 		partition.used += total_size
-		gc_.total_allocated += total_size
+		collector.total_allocated += total_size
 
 		return unsafe { voidptr(usize(current) + sizeof(ObjectHeader)) }
 	}
@@ -517,11 +516,11 @@ fn (mut gc_ GarbageCollector) alloc_from_partition(mut partition HeapPartition, 
 }
 
 // Find the best partition for allocation
-fn (gc_ &GarbageCollector) find_best_partition(size u32) int {
+fn (collector &GarbageCollector) find_best_partition(size u32) int {
 	mut best_idx := -1
 	mut best_fit := u32(0xffffffff)
 
-	for i, partition in gc_.partitions {
+	for i, partition in collector.partitions {
 		available := partition.size - partition.used
 		if available >= size && available < best_fit {
 			best_fit = available
@@ -533,18 +532,18 @@ fn (gc_ &GarbageCollector) find_best_partition(size u32) int {
 }
 
 // Check if garbage collection should be triggered
-fn (gc_ &GarbageCollector) should_collect() bool {
-	if gc_.total_allocated == 0 {
+fn (collector &GarbageCollector) should_collect() bool {
+	if collector.total_allocated == 0 {
 		return false
 	}
 
-	usage_ratio := f64(gc_.total_allocated) / f64(gc_.heap_size)
+	usage_ratio := f64(collector.total_allocated) / f64(collector.heap_size)
 	return usage_ratio >= gc_trigger_threshold
 }
 
 // Add a root to the root set
-pub fn (mut gc_ GarbageCollector) add_root(addr voidptr, size u32) {
-	if gc_.roots.len >= max_roots {
+pub fn (mut collector GarbageCollector) add_root(addr voidptr, size u32) {
+	if collector.roots.len >= max_roots {
 		return
 	}
 
@@ -552,57 +551,57 @@ pub fn (mut gc_ GarbageCollector) add_root(addr voidptr, size u32) {
 		addr: addr
 		size: size
 	}
-	gc_.roots << root
+	collector.roots << root
 }
 
 // Remove a root from the root set
-pub fn (mut gc_ GarbageCollector) remove_root(addr voidptr) {
-	for i, root in gc_.roots {
+pub fn (mut collector GarbageCollector) remove_root(addr voidptr) {
+	for i, root in collector.roots {
 		if root.addr == addr {
-			gc_.roots.delete(i)
+			collector.roots.delete(i)
 			break
 		}
 	}
 }
 
 // Mark and sweep garbage collection
-pub fn (mut gc_ GarbageCollector) collect() {
-	if !gc_.enabled {
+pub fn (mut collector GarbageCollector) collect() {
+	if !collector.enabled {
 		return
 	}
 
-	gc_.gc_count++
+	collector.gc_count++
 
 	// Mark phase
-	gc_.mark_phase()
+	collector.mark_phase()
 
 	// Sweep phase
-	gc_.sweep_phase()
+	collector.sweep_phase()
 }
 
 // Mark phase: mark all reachable objects
-fn (mut gc_ GarbageCollector) mark_phase() {
+fn (mut collector GarbageCollector) mark_phase() {
 	// Clear all marks first
-	for mut partition in gc_.partitions {
+	for mut partition in collector.partitions {
 		for mut obj in partition.objects {
 			obj.marked = false
 		}
 	}
 
 	// Mark from roots
-	for root in gc_.roots {
-		gc_.mark_from_root(root.addr, root.size)
+	for root in collector.roots {
+		collector.mark_from_root(root.addr, root.size)
 	}
 
 	// Mark from stack (conservative scanning)
-	gc_.mark_from_stack()
+	collector.mark_from_stack()
 
 	// Mark from registers (conservative scanning)
-	gc_.mark_from_registers()
+	collector.mark_from_registers()
 }
 
 // Mark objects reachable from a root
-fn (mut gc_ GarbageCollector) mark_from_root(addr voidptr, size u32) {
+fn (mut collector GarbageCollector) mark_from_root(addr voidptr, size u32) {
 	if addr == unsafe { nil } || size == 0 {
 		return
 	}
@@ -613,22 +612,22 @@ fn (mut gc_ GarbageCollector) mark_from_root(addr voidptr, size u32) {
 
 	for i in 0 .. num_ptrs {
 		potential_ptr := unsafe { *(&voidptr(usize(addr) + usize(i * ptr_size))) }
-		gc_.mark_object(potential_ptr)
+		collector.mark_object(potential_ptr)
 	}
 }
 
 // Mark objects reachable from stack
-fn (mut gc_ GarbageCollector) mark_from_stack() {
+fn (mut collector GarbageCollector) mark_from_stack() {
 	// Get current stack pointer (approximation)
 	mut stack_var := 0
 	current_sp := voidptr(&stack_var)
 
 	// Determine stack direction and bounds
-	mut stack_start := gc_.stack_bottom
+	mut stack_start := collector.stack_bottom
 	if stack_start == unsafe { nil } {
 		stack_start = current_sp
 	}
-	mut stack_end := gc_.stack_top
+	mut stack_end := collector.stack_top
 	if stack_end == unsafe { nil } {
 		stack_end = current_sp
 	}
@@ -641,11 +640,11 @@ fn (mut gc_ GarbageCollector) mark_from_stack() {
 	}
 
 	stack_size := usize(stack_end) - usize(stack_start)
-	gc_.mark_from_root(stack_start, u32(stack_size))
+	collector.mark_from_root(stack_start, u32(stack_size))
 }
 
 // Mark objects reachable from registers (simplified)
-fn (mut gc_ GarbageCollector) mark_from_registers() {
+fn (mut collector GarbageCollector) mark_from_registers() {
 	// In a real implementation, we would save all registers and scan them
 	// For simplicity, we'll just scan some local variables
 	mut local_vars := unsafe { [10]voidptr{} }
@@ -654,43 +653,43 @@ fn (mut gc_ GarbageCollector) mark_from_registers() {
 		local_vars[i] = unsafe { nil }
 	}
 
-	gc_.mark_from_root(voidptr(&local_vars[0]), sizeof(local_vars))
+	collector.mark_from_root(voidptr(&local_vars[0]), sizeof(local_vars))
 }
 
 // Mark a specific object if it's in our heap
-fn (mut gc_ GarbageCollector) mark_object(ptr voidptr) {
+fn (mut collector GarbageCollector) mark_object(ptr voidptr) {
 	if ptr == unsafe { nil } {
 		return
 	}
 
 	// Check if pointer is in our heap
-	if !gc_.is_heap_pointer(ptr) {
+	if !collector.is_heap_pointer(ptr) {
 		return
 	}
 
 	// Find the object header
-	mut obj_header := gc_.find_object_header(ptr)
+	mut obj_header := collector.find_object_header(ptr)
 	if obj_header != unsafe { nil } && !obj_header.marked {
 		obj_header.marked = true
 
 		// Recursively mark objects referenced by this object
 		obj_data := unsafe { voidptr(usize(obj_header) + sizeof(ObjectHeader)) }
-		gc_.mark_from_root(obj_data, obj_header.size)
+		collector.mark_from_root(obj_data, obj_header.size)
 	}
 }
 
 // Check if pointer is within our heap bounds
-fn (gc_ &GarbageCollector) is_heap_pointer(ptr voidptr) bool {
-	heap_start := usize(gc_.heap_base)
-	heap_end := heap_start + usize(gc_.heap_size)
+fn (collector &GarbageCollector) is_heap_pointer(ptr voidptr) bool {
+	heap_start := usize(collector.heap_base)
+	heap_end := heap_start + usize(collector.heap_size)
 	ptr_addr := usize(ptr)
 
 	return ptr_addr >= heap_start && ptr_addr < heap_end
 }
 
 // Find object header for a given pointer
-fn (gc_ &GarbageCollector) find_object_header(ptr voidptr) &ObjectHeader {
-	for partition in gc_.partitions {
+fn (collector &GarbageCollector) find_object_header(ptr voidptr) &ObjectHeader {
+	for partition in collector.partitions {
 		for obj in partition.objects {
 			obj_data := unsafe { voidptr(usize(obj) + sizeof(ObjectHeader)) }
 			obj_end := unsafe { voidptr(usize(obj_data) + usize(obj.size)) }
@@ -704,14 +703,14 @@ fn (gc_ &GarbageCollector) find_object_header(ptr voidptr) &ObjectHeader {
 }
 
 // Sweep phase: free unmarked objects
-fn (mut gc_ GarbageCollector) sweep_phase() {
-	for mut partition in gc_.partitions {
+fn (mut collector GarbageCollector) sweep_phase() {
+	for mut partition in collector.partitions {
 		mut i := 0
 		for i < partition.objects.len {
 			obj := partition.objects[i]
 			if !obj.marked {
 				// Free this object
-				gc_.free_object(mut partition, obj, i)
+				collector.free_object(mut partition, obj, i)
 			} else {
 				i++
 			}
@@ -720,13 +719,13 @@ fn (mut gc_ GarbageCollector) sweep_phase() {
 }
 
 // Free an object and add it to the free list
-fn (mut gc_ GarbageCollector) free_object(mut partition HeapPartition, obj &ObjectHeader, obj_idx int) {
+fn (mut collector GarbageCollector) free_object(mut partition HeapPartition, obj &ObjectHeader, obj_idx int) {
 	total_size := obj.size + sizeof(ObjectHeader)
 
 	// Remove from objects list
 	partition.objects.delete(obj_idx)
 	partition.used -= total_size
-	gc_.total_freed += total_size
+	collector.total_freed += total_size
 
 	// Add to free list
 	unsafe {
@@ -736,13 +735,13 @@ fn (mut gc_ GarbageCollector) free_object(mut partition HeapPartition, obj &Obje
 	partition.free_list = unsafe { obj }
 
 	// Try to coalesce adjacent free blocks
-	if gc_.config.enable_coalescing {
-		gc_.coalesce_free_blocks(mut partition)
+	if collector.config.enable_coalescing {
+		collector.coalesce_free_blocks(mut partition)
 	}
 }
 
 // Coalesce adjacent free blocks to reduce fragmentation
-fn (mut gc_ GarbageCollector) coalesce_free_blocks(mut partition HeapPartition) {
+fn (mut collector GarbageCollector) coalesce_free_blocks(mut partition HeapPartition) {
 	if partition.free_list == unsafe { nil } {
 		return
 	}
@@ -819,28 +818,28 @@ fn (mut gc_ GarbageCollector) coalesce_free_blocks(mut partition HeapPartition) 
 }
 
 // Incremental collection (collect one partition at a time)
-pub fn (mut gc_ GarbageCollector) collect_incremental() {
-	if !gc_.enabled {
+pub fn (mut collector GarbageCollector) collect_incremental() {
+	if !collector.enabled {
 		return
 	}
 
 	// Round-robin incremental collection using instance field
-	if gc_.incremental_partition_index >= int(gc_.num_partitions) {
-		gc_.incremental_partition_index = 0
+	if collector.incremental_partition_index >= int(collector.num_partitions) {
+		collector.incremental_partition_index = 0
 	}
 
 	// Collect only one partition
-	gc_.collect_partition(gc_.incremental_partition_index)
-	gc_.incremental_partition_index++
+	collector.collect_partition(collector.incremental_partition_index)
+	collector.incremental_partition_index++
 }
 
 // Collect a specific partition
-fn (mut gc_ GarbageCollector) collect_partition(partition_idx int) {
-	if partition_idx < 0 || partition_idx >= gc_.partitions.len {
+fn (mut collector GarbageCollector) collect_partition(partition_idx int) {
+	if partition_idx < 0 || partition_idx >= collector.partitions.len {
 		return
 	}
 
-	mut partition := &gc_.partitions[partition_idx]
+	mut partition := &collector.partitions[partition_idx]
 
 	// Mark phase for this partition only
 	for mut obj in partition.objects {
@@ -848,8 +847,8 @@ fn (mut gc_ GarbageCollector) collect_partition(partition_idx int) {
 	}
 
 	// Mark from roots (only objects in this partition)
-	for root in gc_.roots {
-		gc_.mark_from_root_partition(root.addr, root.size, partition_idx)
+	for root in collector.roots {
+		collector.mark_from_root_partition(root.addr, root.size, partition_idx)
 	}
 
 	// Sweep phase for this partition
@@ -857,7 +856,7 @@ fn (mut gc_ GarbageCollector) collect_partition(partition_idx int) {
 	for i < partition.objects.len {
 		obj := partition.objects[i]
 		if !obj.marked {
-			gc_.free_object(mut partition, obj, i)
+			collector.free_object(mut partition, obj, i)
 		} else {
 			i++
 		}
@@ -865,8 +864,8 @@ fn (mut gc_ GarbageCollector) collect_partition(partition_idx int) {
 }
 
 // Mark from root but only for specific partition
-fn (mut gc_ GarbageCollector) mark_from_root_partition(addr voidptr, size u32, partition_idx int) {
-	if addr == unsafe { nil } || size == 0 || partition_idx >= gc_.partitions.len {
+fn (mut collector GarbageCollector) mark_from_root_partition(addr voidptr, size u32, partition_idx int) {
+	if addr == unsafe { nil } || size == 0 || partition_idx >= collector.partitions.len {
 		return
 	}
 
@@ -875,17 +874,17 @@ fn (mut gc_ GarbageCollector) mark_from_root_partition(addr voidptr, size u32, p
 
 	for i in 0 .. num_ptrs {
 		potential_ptr := unsafe { *(&voidptr(usize(addr) + usize(i * ptr_size))) }
-		gc_.mark_object_in_partition(potential_ptr, partition_idx)
+		collector.mark_object_in_partition(potential_ptr, partition_idx)
 	}
 }
 
 // Mark object if it's in specific partition
-fn (mut gc_ GarbageCollector) mark_object_in_partition(ptr voidptr, partition_idx int) {
-	if ptr == unsafe { nil } || partition_idx >= gc_.partitions.len {
+fn (mut collector GarbageCollector) mark_object_in_partition(ptr voidptr, partition_idx int) {
+	if ptr == unsafe { nil } || partition_idx >= collector.partitions.len {
 		return
 	}
 
-	mut partition := gc_.partitions[partition_idx]
+	mut partition := collector.partitions[partition_idx]
 	partition_start := usize(partition.start_addr)
 	partition_end := partition_start + usize(partition.size)
 	ptr_addr := usize(ptr)
@@ -904,7 +903,7 @@ fn (mut gc_ GarbageCollector) mark_object_in_partition(ptr voidptr, partition_id
 			if !obj.marked {
 				obj.marked = true
 				// Recursively mark referenced objects in this partition
-				gc_.mark_from_root_partition(obj_data, obj.size, partition_idx)
+				collector.mark_from_root_partition(obj_data, obj.size, partition_idx)
 			}
 			break
 		}
@@ -912,28 +911,28 @@ fn (mut gc_ GarbageCollector) mark_object_in_partition(ptr voidptr, partition_id
 }
 
 // Reset incremental collection state
-pub fn (mut gc_ GarbageCollector) reset_incremental_collection() {
-	gc_.incremental_partition_index = 0
+pub fn (mut collector GarbageCollector) reset_incremental_collection() {
+	collector.incremental_partition_index = 0
 }
 
 // Get current incremental partition index
-pub fn (gc_ &GarbageCollector) get_incremental_partition_index() int {
-	return gc_.incremental_partition_index
+pub fn (collector &GarbageCollector) get_incremental_partition_index() int {
+	return collector.incremental_partition_index
 }
 
 // Memory compaction to reduce fragmentation
-pub fn (mut gc_ GarbageCollector) compact() {
-	if !gc_.enabled || !gc_.config.enable_compaction {
+pub fn (mut collector GarbageCollector) compact() {
+	if !collector.enabled || !collector.config.enable_compaction {
 		return
 	}
 
-	for mut partition in gc_.partitions {
-		gc_.compact_partition(mut partition)
+	for mut partition in collector.partitions {
+		collector.compact_partition(mut partition)
 	}
 }
 
 // Compact a single partition
-fn (mut gc_ GarbageCollector) compact_partition(mut partition HeapPartition) {
+fn (mut collector GarbageCollector) compact_partition(mut partition HeapPartition) {
 	if partition.objects.len == 0 {
 		return
 	}
@@ -978,9 +977,9 @@ fn (mut gc_ GarbageCollector) compact_partition(mut partition HeapPartition) {
 }
 
 // Set stack bounds for conservative scanning
-pub fn (mut gc_ GarbageCollector) set_stack_bounds(bottom voidptr, top voidptr) {
-	gc_.stack_bottom = bottom
-	gc_.stack_top = top
+pub fn (mut collector GarbageCollector) set_stack_bounds(bottom voidptr, top voidptr) {
+	collector.stack_bottom = bottom
+	collector.stack_top = top
 }
 
 // Get GC statistics
@@ -993,17 +992,17 @@ pub:
 	heap_used       u32
 }
 
-pub fn (gc_ &GarbageCollector) get_stats() GCStats {
+pub fn (collector &GarbageCollector) get_stats() GCStats {
 	mut heap_used := u32(0)
-	for partition in gc_.partitions {
+	for partition in collector.partitions {
 		heap_used += partition.used
 	}
 
 	return GCStats{
-		total_allocated: gc_.total_allocated
-		total_freed:     gc_.total_freed
-		gc_count:        gc_.gc_count
-		heap_size:       gc_.heap_size
+		total_allocated: collector.total_allocated
+		total_freed:     collector.total_freed
+		gc_count:        collector.gc_count
+		heap_size:       collector.heap_size
 		heap_used:       heap_used
 	}
 }
@@ -1032,13 +1031,13 @@ pub:
 	fragmentation f64
 }
 
-pub fn (gc_ &GarbageCollector) get_detailed_stats() DetailedGCStats {
+pub fn (collector &GarbageCollector) get_detailed_stats() DetailedGCStats {
 	mut partition_stats := []PartitionStats{}
 	mut total_used := u32(0)
 	mut total_free_blocks := 0
 
-	for i, partition in gc_.partitions {
-		free_blocks, largest_free := gc_.analyze_partition_fragmentation(partition)
+	for i, partition in collector.partitions {
+		free_blocks, largest_free := collector.analyze_partition_fragmentation(partition)
 		fragmentation := if partition.size > 0 {
 			f64(free_blocks) / f64(partition.size) * 100.0
 		} else {
@@ -1058,17 +1057,17 @@ pub fn (gc_ &GarbageCollector) get_detailed_stats() DetailedGCStats {
 		total_free_blocks += free_blocks
 	}
 
-	fragmentation_ratio := if gc_.heap_size > 0 {
-		f64(total_free_blocks) / f64(gc_.heap_size) * 100.0
+	fragmentation_ratio := if collector.heap_size > 0 {
+		f64(total_free_blocks) / f64(collector.heap_size) * 100.0
 	} else {
 		0.0
 	}
 
 	return DetailedGCStats{
-		total_allocated:     gc_.total_allocated
-		total_freed:         gc_.total_freed
-		gc_count:            gc_.gc_count
-		heap_size:           gc_.heap_size
+		total_allocated:     collector.total_allocated
+		total_freed:         collector.total_freed
+		gc_count:            collector.gc_count
+		heap_size:           collector.heap_size
 		heap_used:           total_used
 		fragmentation_ratio: fragmentation_ratio
 		partition_stats:     partition_stats
@@ -1078,7 +1077,7 @@ pub fn (gc_ &GarbageCollector) get_detailed_stats() DetailedGCStats {
 }
 
 // Analyze fragmentation in a partition
-fn (gc_ &GarbageCollector) analyze_partition_fragmentation(partition HeapPartition) (int, u32) {
+fn (collector &GarbageCollector) analyze_partition_fragmentation(partition HeapPartition) (int, u32) {
 	mut free_blocks := 0
 	mut largest_free := u32(0)
 	mut current := partition.free_list
@@ -1095,8 +1094,8 @@ fn (gc_ &GarbageCollector) analyze_partition_fragmentation(partition HeapPartiti
 }
 
 // Memory allocation with tracking (for debugging)
-pub fn (mut gc_ GarbageCollector) alloc_tracked(size u32) voidptr {
-	ptr := gc_.alloc(size)
+pub fn (mut collector GarbageCollector) alloc_tracked(size u32) voidptr {
+	ptr := collector.alloc(size)
 
 	// Track allocation if debugging enabled
 	// This would use allocation_map field when implemented
@@ -1105,10 +1104,10 @@ pub fn (mut gc_ GarbageCollector) alloc_tracked(size u32) voidptr {
 }
 
 // Get allocation info for debugging
-pub fn (gc_ &GarbageCollector) get_allocation_info(ptr voidptr) ?AllocationInfo {
+pub fn (collector &GarbageCollector) get_allocation_info(ptr voidptr) ?AllocationInfo {
 	// This would look up in allocation_map
 	// For now, return basic info by finding the object
-	obj_header := gc_.find_object_header(ptr)
+	obj_header := collector.find_object_header(ptr)
 	if obj_header != unsafe { nil } {
 		return AllocationInfo{
 			size:      obj_header.size
@@ -1119,10 +1118,10 @@ pub fn (gc_ &GarbageCollector) get_allocation_info(ptr voidptr) ?AllocationInfo 
 }
 
 // Heap validation for debugging
-pub fn (gc_ &GarbageCollector) validate_heap() bool {
+pub fn (collector &GarbageCollector) validate_heap() bool {
 	// Check heap integrity
-	for i, partition in gc_.partitions {
-		if !gc_.validate_partition(partition, i) {
+	for i, partition in collector.partitions {
+		if !collector.validate_partition(partition, i) {
 			return false
 		}
 	}
@@ -1130,7 +1129,7 @@ pub fn (gc_ &GarbageCollector) validate_heap() bool {
 }
 
 // Validate a single partition
-fn (gc_ &GarbageCollector) validate_partition(partition HeapPartition, partition_id int) bool {
+fn (collector &GarbageCollector) validate_partition(partition HeapPartition, partition_id int) bool {
 	// Check if partition bounds are valid
 	if partition.start_addr == unsafe { nil } || partition.size == 0 {
 		return false
@@ -1156,13 +1155,13 @@ fn (gc_ &GarbageCollector) validate_partition(partition HeapPartition, partition
 }
 
 // Print heap layout for debugging
-pub fn (gc_ &GarbageCollector) print_heap_layout() {
+pub fn (collector &GarbageCollector) print_heap_layout() {
 	println('Heap Layout:')
-	println('Base: ${gc_.heap_base}, Size: ${gc_.heap_size}')
-	println('Max Size: ${gc_.max_heap_size}, Growth Count: ${gc_.growth_count}')
-	println('Partitions: ${gc_.num_partitions}')
+	println('Base: ${collector.heap_base}, Size: ${collector.heap_size}')
+	println('Max Size: ${collector.max_heap_size}, Growth Count: ${collector.growth_count}')
+	println('Partitions: ${collector.num_partitions}')
 
-	for i, partition in gc_.partitions {
+	for i, partition in collector.partitions {
 		println('Partition ${i}:')
 		println('  Start: ${partition.start_addr}, Size: ${partition.size}')
 		println('  Used: ${partition.used}, Objects: ${partition.objects.len}')
@@ -1189,46 +1188,46 @@ pub:
 	last_growth_gc u32
 }
 
-pub fn (gc_ &GarbageCollector) get_growth_stats() HeapGrowthStats {
+pub fn (collector &GarbageCollector) get_growth_stats() HeapGrowthStats {
 	return HeapGrowthStats{
-		current_size:   gc_.heap_size
-		max_size:       gc_.max_heap_size
-		growth_count:   gc_.growth_count
-		can_grow:       gc_.config.enable_heap_growth && gc_.heap_size < gc_.max_heap_size
-		growth_factor:  gc_.config.growth_factor
-		last_growth_gc: gc_.last_growth_gc_count
+		current_size:   collector.heap_size
+		max_size:       collector.max_heap_size
+		growth_count:   collector.growth_count
+		can_grow:       collector.config.enable_heap_growth && collector.heap_size < collector.max_heap_size
+		growth_factor:  collector.config.growth_factor
+		last_growth_gc: collector.last_growth_gc_count
 	}
 }
 
 // Force heap growth (for testing/manual control)
-pub fn (mut gc_ GarbageCollector) force_grow_heap() bool {
-	if gc_.heap_size >= gc_.max_heap_size {
+pub fn (mut collector GarbageCollector) force_grow_heap() bool {
+	if collector.heap_size >= collector.max_heap_size {
 		return false
 	}
 
 	// Temporarily override the growth check
-	old_enable := gc_.config.enable_heap_growth
-	gc_.config.enable_heap_growth = true
+	old_enable := collector.config.enable_heap_growth
+	collector.config.enable_heap_growth = true
 
-	result := gc_.grow_heap()
-	gc_.config.enable_heap_growth = old_enable
+	result := collector.grow_heap()
+	collector.config.enable_heap_growth = old_enable
 	return result
 }
 
 // Enable or disable garbage collection
-pub fn (mut gc_ GarbageCollector) set_enabled(enabled bool) {
-	gc_.enabled = enabled
+pub fn (mut collector GarbageCollector) set_enabled(enabled bool) {
+	collector.enabled = enabled
 }
 
 // Force immediate garbage collection
-pub fn (mut gc_ GarbageCollector) force_collect() {
-	gc_.collect()
+pub fn (mut collector GarbageCollector) force_collect() {
+	collector.collect()
 }
 
 // Cleanup garbage collector
-pub fn (mut gc_ GarbageCollector) destroy() {
-	if gc_.heap_base != unsafe { nil } {
-		unsafe { free(gc_.heap_base) }
-		gc_.heap_base = unsafe { nil }
+pub fn (mut collector GarbageCollector) destroy() {
+	if collector.heap_base != unsafe { nil } {
+		unsafe { free(collector.heap_base) }
+		collector.heap_base = unsafe { nil }
 	}
 }

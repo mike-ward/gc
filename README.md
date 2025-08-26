@@ -27,8 +27,7 @@ A conservative mark-and-sweep garbage collector implementation for the V program
 
 ## Installation
 ``` bash
-git clone <repository-url>
-cd v-garbage-collector
+git clone https://github.com/mike-ward/gc
 ```
 ## Quick Start
 ### Basic Usage
@@ -146,8 +145,8 @@ pub struct GCConfig {
 ## Examples
 The repository includes comprehensive examples:
 ### Basic Examples
-- - Basic allocation, root management, and statistics `example.v`
-- `gc_demo.v` - Complete growable heap demonstration with multiple scenarios
+- `example.v` - Basic allocation, root management, and statistics 
+- `growable.v` - Complete growable heap demonstration with multiple scenarios
 
 ### Demo Scenarios
 1. **Basic Allocation** - Simple object allocation within initial heap
@@ -157,17 +156,6 @@ The repository includes comprehensive examples:
 5. **Incremental Collection** - Low-latency collection with heap growth
 6. **Performance Comparison** - Fixed vs. growable heap benchmarks
 
-### Running Examples
-``` bash
-# Basic example
-v run example.v
-
-# Comprehensive demo
-v run gc_demo.v
-
-# Run tests
-v test .
-```
 ## Performance Characteristics
 The garbage collector is optimized for:
 ### Low Latency
@@ -213,12 +201,6 @@ growth := collector.get_growth_stats()
 ``` bash
 # Run all tests
 v test .
-
-# Run specific test
-v test gc_test.v
-
-# Run benchmarks
-v run benchmark.v
 ```
 ## License
 MIT License - see LICENSE file for details.
